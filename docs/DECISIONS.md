@@ -175,3 +175,41 @@ test. Separarlos mantiene `test` ligero y deja `compare` como el punto único
 para preguntas de tipo "¿se parece este test al train?". El cacheo de
 `z_train` es la mínima información que permite responder esa pregunta sin
 re-transformar el train cada vez.
+
+## D13 — Discriminación H1 vs H0 con dos `Echo`: función libre `score_lr`
+
+**Decisión.** La discriminación entre dos hipótesis (entrenar un `Echo` sobre
+una muestra H1 y otro sobre H0, y puntuar eventos según se parecen más a una
+o a otra) se implementa como **función libre** `score_lr(echo_h1, echo_h0,
+sample)` en el módulo `echo.lr`, no como método de `Echo`.
+
+Convención de signo:
+
+```
+Δχ²(x) = χ²_H0(x) − χ²_H1(x)
+       > 0  →  x más H1-like
+       < 0  →  x más H0-like
+```
+
+Bajo gaussianidad aproximada (el régimen que `echo` busca conseguir tras los
+pasos 1–5), `Δχ²` es `2·log(L_H1/L_H0)` salvo constante aditiva, lo cual lo
+convierte en un proxy del log-likelihood-ratio.
+
+**Razón para función libre y no método.**
+
+1. La operación es **simétrica** en sus dos `Echo`: ninguno tiene
+   preferencia sobre el otro. Convertir uno en `self` introduce una
+   asimetría artificial que invita a errores de signo
+   (`echo_H0.score_against(echo_H1, ...)` daría el signo opuesto).
+
+2. La firma `score_lr(echo_h1=, echo_h0=)` con kwargs hace explícito quién
+   es quién y elimina cualquier ambigüedad de orden.
+
+3. Preferencia general del proyecto: cuando una operación no necesita
+   estado interno del objeto, exponerla como función libre. Aplicación de
+   la misma filosofía que [[D1]] (funciones puras + clase orquestadora).
+
+**Pendiente.** La versión "proper" del LR (con jacobianos de PIT+probit y
+factor `|Σ|`) que daría la ratio de densidades en `ℝ^d` no está implementada
+— se deja para una iteración futura si la versión `Δχ²` resulta
+insuficiente.
