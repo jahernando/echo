@@ -113,3 +113,38 @@ ambos outputs.
 
 **Razón.** Mantener el índice permite alinear los p-values con metadatos
 externos (etiquetas, pesos, IDs de evento) sin gestión adicional.
+
+## D11 — Diagnóstico del paso 6: `Echo.diagnose(z)`
+
+**Decisión.** El paso 6 (verificación de que las variables transformadas son
+N(0, I) conjuntas) se implementa como `Echo.diagnose(z, deep=False)`, fuera
+del pipeline de transformación. Devuelve un dict con:
+
+- `"marginals"` — DataFrame por componente con `mean`, `std`, `skew`,
+  `excess_kurtosis`, `ks_stat` y `ks_pvalue` (KS contra N(0, 1)).
+- `"spearman"` — matriz de correlación de Spearman.
+- `"iterated_eigenvalues"` (sólo con `deep=True`) — autovalores tras re-aplicar
+  uniformize+probit+PCA sobre `z`.
+
+**Razón.**
+
+1. **Marginales**: el control mínimo y barato. KS, skew y kurtosis cubren
+   desviaciones de N(0, 1) en cada eje.
+
+2. **Spearman, no Pearson**: tras PCA + whitening sobre el train, la matriz de
+   Pearson es *exactamente* la identidad por construcción (los autovectores
+   diagonalizan la covarianza) — por tanto no informa. Spearman captura
+   dependencia monótona no-lineal que PCA no toca.
+
+3. **Iterated eigenvalues**: re-aplicar el pipeline echo sobre `z` re-marginaliza
+   cada componente a N(0, 1) *exacta* y re-diagonaliza. Si `z` ya era
+   conjuntamente gaussiana, esto es un near-no-op y los autovalores quedan
+   ≈ 1. Si hay dependencia no lineal residual, los autovalores se separan de
+   1. Funciona como test de gausianidad conjunta. Marcado como `deep=True`
+   por su coste extra y porque para muchos usos las marginales + Spearman ya
+   bastan.
+
+`diagnose` toma `z` como argumento explícito (en vez de operar sobre un
+atributo `_z_train` guardado): el usuario ya tiene el DataFrame de
+`train(...)` o `test(...)`, y así la misma función sirve para auditar el
+train y el test sin duplicar API.

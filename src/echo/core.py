@@ -8,7 +8,9 @@ single stateful object that implements steps 1–8 of the algorithm:
     3. Find the symmetry axes (PCA) of the resulting cloud on the train.
     4. Rotate the variables onto those axes.
     5. Whiten by dividing each component by sqrt(eigenvalue).
-    6. (Diagnostic, not done here) Check that the whitened variables are N(0,1).
+    6. (Diagnostic) Check that the whitened variables are jointly N(0, I) —
+       implemented as a separate method ``diagnose(z)``, not part of the
+       train/test transform.
     7. For each event, compute chi2 = sum_i z_i^2.
     8. Build the ECDF of the train's chi2 and use ``p = 1 − ECDF(chi2)`` as
        the per-event p-value (physics convention: small p → anomalous, i.e.
@@ -18,6 +20,7 @@ single stateful object that implements steps 1–8 of the algorithm:
 
 import numpy as np
 import pandas as pd
+from scipy.stats import kstest, kurtosis, skew
 
 from echo.transform import fit_uniformize, to_normal
 
@@ -30,6 +33,7 @@ class Echo:
     >>> echo = Echo()
     >>> z_train, p_train = echo.train(train_df)
     >>> z_test,  p_test  = echo.test(test_df)
+    >>> report = echo.diagnose(z_train)
     """
 
     def __init__(self):
@@ -81,6 +85,59 @@ class Echo:
         self._chi2_pvalue = fit_uniformize(chi2)
 
         return self._wrap_outputs(z, chi2, sample.index)
+
+    def diagnose(self, z, deep=False):
+        """Diagnose Gaussianity / decorrelation quality of a transformed sample.
+
+        Parameters
+        ----------
+        z : pandas.DataFrame, shape (n, d)
+            The output of ``train(...)`` or ``test(...)`` — variables already
+            in the whitened ``z``-space.
+        deep : bool, default False
+            If True, also run an *iterated* check: re-apply per-column
+            uniformize+probit to ``z`` and rerun PCA. The resulting eigenvalue
+            spectrum should be all ≈ 1 if ``z`` is jointly Gaussian. Spread
+            away from 1 indicates non-linear residual dependence that PCA
+            alone cannot remove.
+
+        Returns
+        -------
+        dict
+            ``"marginals"`` : DataFrame indexed by column of ``z`` with
+            ``mean``, ``std``, ``skew``, ``excess_kurtosis``, ``ks_stat``,
+            ``ks_pvalue`` (KS against N(0, 1)).
+
+            ``"spearman"`` : DataFrame ``(d × d)`` of Spearman (rank)
+            correlations. Pearson on the train is identity by construction
+            so we report Spearman, which captures monotone non-linear
+            dependence PCA does not remove.
+
+            ``"iterated_eigenvalues"`` : ndarray ``(d,)``, only present if
+            ``deep=True``.
+        """
+
+        rows = []
+        for col in z.columns:
+            values   = z[col].to_numpy()
+            ks       = kstest(values, "norm")
+            rows.append({
+                "mean":            values.mean(),
+                "std":             values.std(ddof=1),
+                "skew":            skew(values),
+                "excess_kurtosis": kurtosis(values, fisher=True),
+                "ks_stat":         ks.statistic,
+                "ks_pvalue":       ks.pvalue,
+            })
+        marginals = pd.DataFrame(rows, index=z.columns)
+
+        result = {
+            "marginals": marginals,
+            "spearman":  z.corr(method="spearman"),
+        }
+        if deep:
+            result["iterated_eigenvalues"] = self._iterated_eigenvalues(z)
+        return result
 
     def test(self, sample):
         """Apply the fitted pipeline to a new sample.
@@ -139,6 +196,14 @@ class Echo:
         # Physics convention: small p → far-from-origin (anomalous) event.
         p = 1.0 - self._chi2_pvalue(chi2)
         return z_df, pd.Series(p, index=index, name="p_value")
+
+    def _iterated_eigenvalues(self, z):
+        """Re-Gaussianize per column, then PCA: eigenvalues ≈ 1 ⇒ joint N(0, I)."""
+
+        z_renorm = np.column_stack([to_normal(fit_uniformize(z[c])(z[c])) for c in z.columns])
+        cov      = np.atleast_2d(np.cov(z_renorm, rowvar=False))
+        eigvals  = np.linalg.eigvalsh(cov)
+        return np.sort(eigvals)[::-1]
 
     def _require_trained(self):
         if self._rotation is None:

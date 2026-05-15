@@ -191,6 +191,80 @@ def test_test_reorders_columns_to_match_train():
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# diagnose()
+# ---------------------------------------------------------------------------
+
+
+def test_diagnose_returns_expected_structure():
+    train = make_sample(2_000, ["normal", "uniform", "normal"], seed=30)
+    echo  = Echo()
+    z, _  = echo.train(train)
+
+    report = echo.diagnose(z)
+
+    assert set(report) == {"marginals", "spearman"}
+    assert list(report["marginals"].columns) == [
+        "mean", "std", "skew", "excess_kurtosis", "ks_stat", "ks_pvalue",
+    ]
+    assert list(report["marginals"].index) == ["z0", "z1", "z2"]
+    assert report["spearman"].shape == (3, 3)
+
+
+def test_diagnose_marginals_on_h0_are_close_to_n01():
+    train = make_sample(20_000, ["normal", "uniform", "normal"], correlation=0.5, seed=31)
+    echo  = Echo()
+    z, _  = echo.train(train)
+
+    m = echo.diagnose(z)["marginals"]
+    assert np.all(np.abs(m["mean"])              < 0.05)
+    assert np.all(np.abs(m["std"] - 1.0)         < 0.05)
+    assert np.all(np.abs(m["skew"])              < 0.10)
+    assert np.all(np.abs(m["excess_kurtosis"])   < 0.20)
+    assert np.all(m["ks_stat"]                   < 0.02)
+
+
+def test_diagnose_spearman_on_h0_is_near_zero():
+    """Even though Pearson is identity by construction, Spearman should also be ≈ 0 on H0."""
+
+    train = make_sample(20_000, ["normal", "uniform", "normal"], correlation=0.5, seed=32)
+    echo  = Echo()
+    z, _  = echo.train(train)
+
+    s = echo.diagnose(z)["spearman"].to_numpy()
+    off_diag = s[~np.eye(3, dtype=bool)]
+    assert np.all(np.abs(off_diag) < 0.03)
+
+
+def test_diagnose_deep_returns_iterated_eigenvalues():
+    train = make_sample(20_000, ["normal", "uniform", "normal"], seed=33)
+    echo  = Echo()
+    z, _  = echo.train(train)
+
+    report = echo.diagnose(z, deep=True)
+
+    assert "iterated_eigenvalues" in report
+    assert report["iterated_eigenvalues"].shape == (3,)
+    np.testing.assert_allclose(report["iterated_eigenvalues"], 1.0, atol=0.05)
+
+
+def test_diagnose_deep_flags_non_gaussian_joint_structure():
+    """If z has non-linear dependence, iterated eigenvalues spread away from 1."""
+
+    rng = np.random.default_rng(34)
+    x   = rng.standard_normal(20_000)
+    y   = x ** 2 - 1                          # quadratic dependence — not captured by Pearson
+    n   = rng.standard_normal(20_000)
+    df  = pd.DataFrame({"x": x, "y": y, "z": n})
+
+    echo = Echo()
+    z, _ = echo.train(df)
+
+    eigvals  = echo.diagnose(z, deep=True)["iterated_eigenvalues"]
+    spread   = eigvals.max() - eigvals.min()
+    assert spread > 0.1
+
+
 def test_single_variable_pipeline():
     """The pipeline must work for d=1 (degenerate rotation)."""
 
