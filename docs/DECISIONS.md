@@ -148,3 +148,30 @@ del pipeline de transformación. Devuelve un dict con:
 atributo `_z_train` guardado): el usuario ya tiene el DataFrame de
 `train(...)` o `test(...)`, y así la misma función sirve para auditar el
 train y el test sin duplicar API.
+
+## D12 — `compare(test_sample)` y cacheo de `_z_train`
+
+**Decisión.** Se añade `Echo.compare(test_sample, alphas=(0.01, 0.05, 0.10))`
+que combina la transformación del test con un set de tests 1D train-vs-test
+en el espacio whitened. Devuelve un dict con:
+
+- `"z"`, `"p"` — los outputs estándar de `test(...)`, para reuso.
+- `"marginals"` — DataFrame por componente `z_i` con KS de dos muestras
+  (train vs test) y su p-valor.
+- `"global"` — `mean_p`, `ks_stat_uniform`, `ks_pvalue_uniform` (KS de
+  `p_test` vs U(0,1)) y `frac_below_alpha` (Series indexada por `alphas`).
+
+Para evitar duplicar cómputo, `train(...)` cachea ahora el DataFrame `z_train`
+en el atributo privado `_z_train` (≈ O(n_train · d) extra de memoria).
+
+**No** se cachea `_p_train`: matemáticamente es determinístico
+(`(rank + 0.5) / (n_train + 1)` de los `chi2_train`), y no se usa en
+`compare` (la uniformidad del test se valida contra `U(0,1)` teórica, no
+contra `p_train`).
+
+**Razón.** `test` y `compare` se diferencian en intención: `test` es la
+transformación pura, `compare` es la inferencia (test estadístico) sobre el
+test. Separarlos mantiene `test` ligero y deja `compare` como el punto único
+para preguntas de tipo "¿se parece este test al train?". El cacheo de
+`z_train` es la mínima información que permite responder esa pregunta sin
+re-transformar el train cada vez.

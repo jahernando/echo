@@ -20,7 +20,7 @@ single stateful object that implements steps 1–8 of the algorithm:
 
 import numpy as np
 import pandas as pd
-from scipy.stats import kstest, kurtosis, skew
+from scipy.stats import ks_2samp, kstest, kurtosis, skew
 
 from echo.transform import fit_uniformize, to_normal
 
@@ -34,6 +34,7 @@ class Echo:
     >>> z_train, p_train = echo.train(train_df)
     >>> z_test,  p_test  = echo.test(test_df)
     >>> report = echo.diagnose(z_train)
+    >>> stats  = echo.compare(test_df)
     """
 
     def __init__(self):
@@ -43,6 +44,7 @@ class Echo:
         self._eigenvalues  = None    # (d,)   ndarray
         self._scales       = None    # (d,)   ndarray, = sqrt(eigenvalues)
         self._chi2_pvalue  = None    # callable: chi2 -> p
+        self._z_train      = None    # DataFrame (n_train, d), cached for compare()
 
     # ------------------------------------------------------------------
     # public API
@@ -84,7 +86,63 @@ class Echo:
         z, chi2           = self._rotate_whiten_chi2(z_pre)
         self._chi2_pvalue = fit_uniformize(chi2)
 
-        return self._wrap_outputs(z, chi2, sample.index)
+        z_df, p_series = self._wrap_outputs(z, chi2, sample.index)
+        self._z_train  = z_df
+        return z_df, p_series
+
+    def compare(self, sample, alphas=(0.01, 0.05, 0.10)):
+        """Apply the pipeline to ``sample`` and compare its distribution to the train.
+
+        Parameters
+        ----------
+        sample : pandas.DataFrame or array_like
+            Test sample to compare against the cached train.
+        alphas : sequence of float, default (0.01, 0.05, 0.10)
+            Significance thresholds for the low-p tail accounting.
+
+        Returns
+        -------
+        dict
+            ``"z"``, ``"p"`` : the transformed test and its p-values (same as
+            ``test(sample)``).
+
+            ``"marginals"`` : DataFrame indexed by ``z_i`` with the two-sample
+            KS train-vs-test statistic and p-value per whitened component.
+            Localizes the discrepancy in z-space.
+
+            ``"global"`` : dict with ``mean_p``, ``ks_stat_uniform``,
+            ``ks_pvalue_uniform`` (KS of the test p-values against U(0, 1))
+            and ``frac_below_alpha`` (Series indexed by ``alphas``).
+        """
+
+        self._require_trained()
+        z, p = self.test(sample)
+
+        rows = []
+        for col in self._z_train.columns:
+            ks = ks_2samp(self._z_train[col].to_numpy(), z[col].to_numpy())
+            rows.append({"ks_stat": ks.statistic, "ks_pvalue": ks.pvalue})
+        marginals = pd.DataFrame(rows, index=list(self._z_train.columns))
+
+        ks_uniform   = kstest(p.to_numpy(), "uniform")
+        frac_low_p   = pd.Series(
+            {float(a): float((p < a).mean()) for a in alphas},
+            name="frac_below_alpha",
+        )
+
+        global_stats = {
+            "mean_p":            float(p.mean()),
+            "ks_stat_uniform":   float(ks_uniform.statistic),
+            "ks_pvalue_uniform": float(ks_uniform.pvalue),
+            "frac_below_alpha":  frac_low_p,
+        }
+
+        return {
+            "z":         z,
+            "p":         p,
+            "marginals": marginals,
+            "global":    global_stats,
+        }
 
     def diagnose(self, z, deep=False):
         """Diagnose Gaussianity / decorrelation quality of a transformed sample.

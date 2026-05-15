@@ -265,6 +265,86 @@ def test_diagnose_deep_flags_non_gaussian_joint_structure():
     assert spread > 0.1
 
 
+# ---------------------------------------------------------------------------
+# compare()
+# ---------------------------------------------------------------------------
+
+
+def test_compare_returns_expected_structure():
+    train = make_sample(2_000, ["normal", "uniform", "normal"], seed=40)
+    test  = make_sample(1_000, ["normal", "uniform", "normal"], seed=41)
+    echo  = Echo()
+    echo.train(train)
+
+    result = echo.compare(test)
+
+    assert set(result) == {"z", "p", "marginals", "global"}
+    assert result["z"].shape == (1_000, 3)
+    assert result["p"].shape == (1_000,)
+    assert list(result["marginals"].columns) == ["ks_stat", "ks_pvalue"]
+    assert list(result["marginals"].index)   == ["z0", "z1", "z2"]
+    assert set(result["global"]) == {
+        "mean_p", "ks_stat_uniform", "ks_pvalue_uniform", "frac_below_alpha",
+    }
+
+
+def test_compare_on_h0_does_not_reject_uniformity():
+    train = make_sample(20_000, ["normal", "uniform", "normal"], correlation=0.4, seed=42)
+    test  = make_sample(10_000, ["normal", "uniform", "normal"], correlation=0.4, seed=43)
+
+    echo = Echo()
+    echo.train(train)
+    result = echo.compare(test)
+
+    assert result["global"]["ks_pvalue_uniform"]   > 0.05
+    assert abs(result["global"]["mean_p"] - 0.5)   < 0.02
+
+    # Per-component KS pvalues should be uniformly distributed; no extreme rejections.
+    assert result["marginals"]["ks_pvalue"].min() > 0.01
+
+
+def test_compare_detects_shift():
+    train = make_sample(20_000, ["normal", "uniform", "normal"], correlation=0.4, seed=44)
+    test  = make_sample(10_000, ["normal", "uniform", "normal"], correlation=0.4, seed=45)
+    test["x"] = test["x"] + 0.5
+
+    echo = Echo()
+    echo.train(train)
+    result = echo.compare(test)
+
+    # Global uniformity is rejected and low-p tail shows excess.
+    assert result["global"]["ks_pvalue_uniform"] < 1e-3
+    assert result["global"]["frac_below_alpha"][0.05] > 0.06
+
+    # Per-component KS rejects on at least one z_i.
+    assert (result["marginals"]["ks_pvalue"] < 1e-3).any()
+
+
+def test_compare_alphas_argument_is_respected():
+    train = make_sample(2_000, ["normal", "uniform"], seed=46)
+    test  = make_sample(1_000, ["normal", "uniform"], seed=47)
+    echo  = Echo()
+    echo.train(train)
+
+    result = echo.compare(test, alphas=(0.001, 0.5))
+    assert list(result["global"]["frac_below_alpha"].index) == [0.001, 0.5]
+
+
+def test_compare_before_train_raises():
+    test = make_sample(100, ["normal", "uniform"], seed=48)
+    with pytest.raises(RuntimeError, match="not been trained"):
+        Echo().compare(test)
+
+
+def test_z_train_is_cached_after_train():
+    train = make_sample(500, ["normal", "uniform"], seed=49)
+    echo  = Echo()
+    z, _  = echo.train(train)
+
+    assert echo._z_train is not None
+    pd.testing.assert_frame_equal(echo._z_train, z)
+
+
 def test_single_variable_pipeline():
     """The pipeline must work for d=1 (degenerate rotation)."""
 
