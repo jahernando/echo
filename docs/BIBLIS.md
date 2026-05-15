@@ -17,7 +17,8 @@ Cada entrada incluye: referencia canónica, idea central, formulación esencial,
 7. Métodos específicos de física de partículas (HEP)
 8. Enfoques bayesianos
 9. Librerías y recursos
-10. Roadmap orientativo para `echo`
+10. Métodos de Gaussianización — bases teóricas y equivalentes a `echo`
+11. Roadmap orientativo para `echo`
 
 ---
 
@@ -35,7 +36,7 @@ Sólo aplicables marginal a marginal en multivariante. Sirven como baseline y di
 
 **Limitaciones**: Más sensible cerca del centro que en las colas. Sólo 1D — sus extensiones multivariantes (Peacock, Fasano–Franceschini) son costosas y poco usadas. Subóptimo cuando las diferencias son en las colas.
 
-**Implementación**: `scipy.stats.ks_2samp`.
+**Implementación**: [`scipy.stats.ks_2samp`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ks_2samp.html).
 
 ### 1.2. Anderson–Darling (2-sample)
 
@@ -45,7 +46,7 @@ Sólo aplicables marginal a marginal en multivariante. Sirven como baseline y di
 
 **Limitaciones**: 1D igualmente. Distribución del estadístico requiere tabulación o bootstrap.
 
-**Implementación**: `scipy.stats.anderson_ksamp`.
+**Implementación**: [`scipy.stats.anderson_ksamp`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.anderson_ksamp.html).
 
 ### 1.3. Cramér–von Mises (2-sample)
 
@@ -53,7 +54,7 @@ Sólo aplicables marginal a marginal en multivariante. Sirven como baseline y di
 
 **Idea**: Integra la diferencia cuadrática entre CDFs en lugar de tomar el supremo. `T = ∫ (F_n − G_m)² dH_{n+m}`. Más robusto que KS frente a outliers, similar potencia global.
 
-**Implementación**: `scipy.stats.cramervonmises_2samp`.
+**Implementación**: [`scipy.stats.cramervonmises_2samp`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.cramervonmises_2samp.html).
 
 ### 1.4. χ² (Pearson) / G-test
 
@@ -63,7 +64,7 @@ Sólo aplicables marginal a marginal en multivariante. Sirven como baseline y di
 
 **Limitaciones**: Depende fuertemente del binning. En multivariante el número de bins explota (curse of dimensionality). Requiere `E_i ≳ 5` por bin para validez asintótica.
 
-**Implementación**: `scipy.stats.chisquare`; binning manual con NumPy.
+**Implementación**: [`scipy.stats.chisquare`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.chisquare.html); binning manual con NumPy.
 
 ---
 
@@ -151,7 +152,7 @@ Construyen un grafo sobre la unión de las dos muestras y miden si las etiquetas
 
 **Limitaciones**: Sensible a empates en distancias. Construcción del MST es O(n² log n). En dim muy alta el MST pierde discriminación.
 
-**Implementación**: `scipy.spatial.minimum_spanning_tree` + lógica manual.
+**Implementación**: [`scipy.sparse.csgraph.minimum_spanning_tree`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.csgraph.minimum_spanning_tree.html) + lógica manual.
 
 ### 3.2. Henze–Penrose / k-NN tests
 
@@ -163,7 +164,7 @@ Construyen un grafo sobre la unión de las dos muestras y miden si las etiquetas
 
 **Limitaciones**: Elección de k. Distribución asintótica conocida sólo bajo ciertos supuestos.
 
-**Implementación**: `scipy.spatial.cKDTree` + cómputo manual.
+**Implementación**: [`scipy.spatial.cKDTree`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.cKDTree.html) + cómputo manual.
 
 ---
 
@@ -393,7 +394,7 @@ P-value por permutación.
 
 | Librería | Métodos cubiertos | Notas |
 |---|---|---|
-| `scipy.stats` | KS, Anderson, Cramér-von Mises, χ², t-test | Sólido para 1D. |
+| [`scipy.stats`](https://docs.scipy.org/doc/scipy/reference/stats.html) | KS, Anderson, Cramér-von Mises, χ², t-test | Sólido para 1D. |
 | `torch-two-sample` | MMD, energy, FR, k-NN | PyTorch, mantenimiento variable. |
 | `POT` (Python Optimal Transport) | Wasserstein, Sinkhorn, transport plans | Maduro y bien documentado. |
 | `geomloss` | Sinkhorn / energy / MMD en GPU | Para tensors grandes. |
@@ -412,7 +413,47 @@ P-value por permutación.
 
 ---
 
-## 10. Roadmap orientativo para `echo`
+## 10. Métodos de Gaussianización — bases teóricas y equivalentes a `echo`
+
+Los métodos que más se acercan en filosofía y mecánica a `echo`: transformar las variables de entrada a un espacio gaussiano estándar (idealmente independiente) y operar ahí.
+
+### 10.1. Probability Integral Transform (Rosenblatt)
+
+**Ref**: Rosenblatt. *Remarks on a multivariate transformation*. Ann. Math. Stat. 23(3):470–472 (1952).
+
+**Idea**: Si `X ~ F` con `F` continua, entonces `F(X) ~ U(0, 1)`. En multivariante, la "descomposición de Rosenblatt" generaliza el resultado vía CDFs condicionales. Aplicar la ECDF marginal seguida del probit (`Φ⁻¹`) es exactamente los pasos 1 y 2 de `echo`.
+
+**Implementación**: [`scipy.stats.rankdata`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.rankdata.html), [`scipy.stats.norm.ppf`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.norm.html) (probit), [`numpy.searchsorted`](https://numpy.org/doc/stable/reference/generated/numpy.searchsorted.html).
+
+### 10.2. Iterative Gaussianization / RBIG
+
+**Ref**: Chen & Gopinath. *Gaussianization*. NeurIPS 2000. — Laparra, Camps-Valls, Malo. *Iterative Gaussianization: From ICA to Random Rotations*. IEEE Trans. Neural Netw. 22(4):537–549 (2011). [arXiv:1004.0925](https://arxiv.org/abs/1004.0925).
+
+**Idea**: Iterar dos pasos hasta convergencia: (a) Gaussianización marginal por PIT+probit en cada componente; (b) rotación ortogonal (PCA, ICA o aleatoria). Bajo condiciones suaves la composición converge a una transformación que lleva la distribución original a `N(0, I_d)`. Da además una estimación de la densidad por jacobianos (cambio de variables).
+
+**Relación con `echo`**: Una sola iteración de RBIG (PIT marginal + PCA) es literalmente los pasos 1–4 de `echo`. `echo` añade whitening explícito (paso 5) y un chi2 → p-value vía ECDF del propio train (pasos 7–8) que RBIG no contempla. El diagnóstico `Echo.diagnose(z, deep=True)` (volver a aplicar PIT+probit+PCA y comprobar autovalores ≈ 1) es de hecho un test "RBIG convergió en una iteración".
+
+### 10.3. Nonparanormal (NPN) / Gaussian copula
+
+**Ref**: Liu, Lafferty, Wasserman. *The Nonparanormal: Semiparametric Estimation of High Dimensional Undirected Graphs*. JMLR 10:2295–2328 (2009). [arXiv:0903.0649](https://arxiv.org/abs/0903.0649). Base clásica: Sklar 1959 (Gaussian copula).
+
+**Idea**: Modela `X ∈ ℝ^d` como `X = f(Y)` donde `Y ~ N(μ, Σ)` y `f` es un vector de funciones monótonas marginales. Las `f_j` se estiman por isotone regression o ECDF suavizada; la covarianza `Σ` se estima sobre `Y = f⁻¹(X)`. Caso particular del Gaussian copula model.
+
+**Relación con `echo`**: Misma transformación marginal (PIT+probit) que los pasos 1–2. NPN se centra en estimar la covarianza/grafo en el espacio gaussiano latente; `echo` lo decorrela vía PCA y mide desviaciones puntuales con chi2.
+
+### 10.4. Hotelling T² y distancia de Mahalanobis
+
+**Ref**: Hotelling. *The generalization of Student's ratio*. Ann. Math. Stat. 2(3):360–378 (1931). — Mahalanobis. *On the generalised distance in statistics*. Proc. Natl. Inst. Sci. India 2(1):49–55 (1936).
+
+**Idea**: Para `X ~ N(μ, Σ)`, el estadístico `T² = (X − μ)^T Σ⁻¹ (X − μ)` se distribuye `χ²_d` (o `F` si `Σ` se estima de la muestra). Test clásico de goodness-of-fit gaussiano multivariante.
+
+**Relación con `echo`**: Tras los pasos 1–5 cada evento es `z ∈ ℝ^d` con `z ≈ N(0, I)` bajo H₀; el chi2 del paso 7 (`χ² = ||z||² = Σ_i z_i²`) es exactamente Mahalanobis-cuadrado en el espacio whitened. La novedad operativa de `echo` está en (a) no asumir gausianidad de las variables originales (vía PIT) y (b) usar la ECDF del chi2 del train en vez de `χ²_d` teórica para definir el p-value — robusto cuando la Gaussianización no es perfecta.
+
+**Implementación**: [`scipy.spatial.distance.mahalanobis`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.distance.mahalanobis.html).
+
+---
+
+## 11. Roadmap orientativo para `echo`
 
 Una posible jerarquía de funcionalidad a implementar:
 
